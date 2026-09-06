@@ -35,8 +35,16 @@ import torch.nn.functional as F
 # Serial organs: a max-dose (not mean-dose) violation is the clinically
 # critical failure mode, so they default to the high end of the weight
 # range even if not explicitly listed in `structure_weights`.
-DEFAULT_SERIAL_ORGANS = {"SpinalCord", "SpinalCord_05", "BrainStem", "BrainStem_03", "Chiasm",
-                          "OpticNerve_L", "OpticNerve_R", "OpticChiasm"}
+#
+# Includes both "Brainstem" (data_pipeline.DEFAULT_OAR_LABEL_MAP /
+# synthetic_data.py's naming, following dvhnet's original convention) and
+# "BrainStem" (the real GDP-HMM naming found in dvhnet/gdp_hmm_adapter.py,
+# e.g. "BrainStem_03") -- these two tracks use different casing for the same
+# structure and this set has to match both, or synthetic data silently gets
+# the wrong (parallel) weight, which is exactly what happened here before
+# this was caught.
+DEFAULT_SERIAL_ORGANS = {"SpinalCord", "SpinalCord_05", "Brainstem", "BrainStem", "BrainStem_03",
+                          "Chiasm", "OpticNerve_L", "OpticNerve_R", "OpticChiasm"}
 DEFAULT_SERIAL_WEIGHT = 5.0
 DEFAULT_PARALLEL_WEIGHT = 2.0
 DEFAULT_PTV_WEIGHT = 3.0

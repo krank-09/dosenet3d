@@ -80,6 +80,8 @@ class PreprocessConfig:
     resample_order_ct: int = 1                             # linear
     resample_order_dose: int = 1                            # linear
     resample_order_mask: int = 0                            # nearest -- keep hard boundaries, see dvhnet/README.md's same caveat
+    dose_rescale_to_prescription_d97: bool = False          # rescale dose so D97 in the highest-Rx PTV exactly equals its prescription (see rescale_dose_to_prescription_d97) -- convention from gdp_hmm_reference/full_source/data_loader.py; off by default, changes the target's numeric scale
+    dose_rescale_clip_factor: float = 1.2                   # when the above is on, clip dose to [0, Rx_high * this] after rescaling
 
 
 DEFAULT_OAR_LABEL_MAP: Dict[str, int] = {
@@ -169,6 +171,40 @@ def normalize_dose(dose_gy: np.ndarray, prescription_dose_gy: float, cfg: Prepro
     return dose_gy.astype(np.float32)
 
 
+def apply_body_mask(dose: np.ndarray, body_mask: np.ndarray) -> np.ndarray:
+    """Zero dose outside the patient's Body contour before it's used as a
+    training label -- avoids training the model to fit meaningless dose
+    values in air/outside-patient voxels (resampling/interpolation can
+    otherwise leak small nonzero values across the body boundary).
+    Convention from gdp_hmm_reference/full_source/data_loader.py."""
+    return (dose * (body_mask > 0)).astype(np.float32)
+
+
+def rescale_dose_to_prescription_d97(dose: np.ndarray, ptv_high_mask: np.ndarray,
+                                      prescription_dose_gy: float, clip_factor: float = 1.2,
+                                      eps: float = 1e-5) -> np.ndarray:
+    """
+    Rescale dose so D97 (the dose received by 97% of the highest-Rx PTV's
+    volume, i.e. the 3rd percentile of dose within that structure) exactly
+    equals its prescribed dose -- corrects for the fact that raw dose
+    doesn't necessarily land exactly on Rx due to planning/optimization
+    slop. Then clips to [0, Rx * clip_factor] to guard against extreme
+    hot-spot outliers dominating the rescale. Convention from
+    gdp_hmm_reference/full_source/data_loader.py's `MyDataset.__getitem__`.
+
+    If `ptv_high_mask` has no voxels, dose is returned unrescaled (can't
+    anchor to a percentile of nothing) -- not an error, since a slice/crop
+    might genuinely miss the PTV.
+    """
+    voxel_doses = dose[ptv_high_mask > 0]
+    if voxel_doses.size == 0:
+        return dose.astype(np.float32)
+    d97 = np.percentile(voxel_doses, 3)
+    scale = prescription_dose_gy / (d97 + eps)
+    rescaled = dose * scale
+    return np.clip(rescaled, 0.0, prescription_dose_gy * clip_factor).astype(np.float32)
+
+
 # --------------------------------------------------------------------------- #
 # In-plane-only resampling + fixed-depth crop (real-data shape adaptation)
 # --------------------------------------------------------------------------- #
@@ -230,15 +266,25 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
                        cfg: PreprocessConfig,
                        prescription_doses: Dict[str, float],
                        oar_label_map: Dict[str, int] = None,
-                       ) -> Tuple[np.ndarray, np.ndarray]:
+                       body_mask_zhw: Optional[np.ndarray] = None,
+                       ) -> Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
     """
     The single place the windowing / channel-construction / in-plane
     resample / depth-crop logic lives. Takes already-loaded [Z, H, W]
     CT/dose/mask arrays -- however they were loaded (DICOM via
-    dvhnet.preprocessing today, or a future GDP-HMM npz adapter) -- and
-    returns the final [C, H, W, D] input tensor and [1, H, W, D] target
-    tensor. Both `load_and_preprocess_patient` below and the future
-    GDP-HMM adapter should call this rather than duplicating any of it.
+    dvhnet.preprocessing today, or gdp_hmm_adapter.py) -- and returns the
+    final [C, H, W, D] input tensor, [1, H, W, D] target tensor, and a
+    {structure_name: [H, W, D] binary} dict of every PTV/OAR mask at the
+    SAME post-resample/post-crop grid as the input/target -- callers (the
+    GDP-HMM adapter's Dataset) need this exact alignment for
+    losses.RegionWeightedOrganLoss, and recomputing it separately would
+    risk drifting out of sync with the resample/crop done here.
+
+    `body_mask_zhw` is optional: when given, dose outside it is zeroed
+    (apply_body_mask) before use as the target. When
+    `cfg.dose_rescale_to_prescription_d97` is set, dose is additionally
+    rescaled so D97 in the highest-Rx PTV (the max of `prescription_doses`)
+    matches its prescribed dose. Both run before `normalize_dose`.
     """
     oar_label_map = oar_label_map or DEFAULT_OAR_LABEL_MAP
 
@@ -252,12 +298,17 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
         name: (resample_inplane_only(m.astype(np.float32), spacing, cfg.target_hw, cfg.resample_order_mask)[0] > 0.5).astype(np.uint8)
         for name, m in oar_masks_zhw.items()
     }
+    body_resampled = None
+    if body_mask_zhw is not None:
+        body_resampled = (resample_inplane_only(body_mask_zhw.astype(np.float32), spacing, cfg.target_hw,
+                                                  cfg.resample_order_mask)[0] > 0.5).astype(np.uint8)
 
     # [Z, H, W] -> [H, W, D]
     ct_hwd = np.transpose(ct_resampled, (1, 2, 0))
     dose_hwd = np.transpose(dose_resampled, (1, 2, 0))
     ptv_hwd = {name: np.transpose(m, (1, 2, 0)) for name, m in ptv_resampled.items()}
     oar_hwd = {name: np.transpose(m, (1, 2, 0)) for name, m in oar_resampled.items()}
+    body_hwd = np.transpose(body_resampled, (1, 2, 0)) if body_resampled is not None else None
 
     union_ptv = np.zeros(ct_hwd.shape, dtype=np.uint8)
     for m in ptv_hwd.values():
@@ -268,6 +319,17 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
     dose_hwd = crop_or_pad_depth(dose_hwd, center_z, cfg.target_depth)
     ptv_hwd = {name: crop_or_pad_depth(m, center_z, cfg.target_depth) for name, m in ptv_hwd.items()}
     oar_hwd = {name: crop_or_pad_depth(m, center_z, cfg.target_depth) for name, m in oar_hwd.items()}
+    if body_hwd is not None:
+        body_hwd = crop_or_pad_depth(body_hwd, center_z, cfg.target_depth)
+        dose_hwd = apply_body_mask(dose_hwd, body_hwd)
+
+    max_prescription = max(prescription_doses.values()) if prescription_doses else 1.0
+    if cfg.dose_rescale_to_prescription_d97 and prescription_doses:
+        ptv_high_name = max(prescription_doses, key=prescription_doses.get)
+        if ptv_high_name in ptv_hwd:
+            dose_hwd = rescale_dose_to_prescription_d97(dose_hwd, ptv_hwd[ptv_high_name],
+                                                         prescription_doses[ptv_high_name],
+                                                         cfg.dose_rescale_clip_factor)
 
     ct_channel = window_and_normalize_ct(ct_hwd, cfg)
     ptv_channel = build_ptv_channel(ptv_hwd, prescription_doses, cfg)
@@ -277,11 +339,12 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
     channels += list(oar_channel) if oar_channel.ndim == 4 else [oar_channel]
     input_tensor = np.stack(channels, axis=0).astype(np.float32)
 
-    max_prescription = max(prescription_doses.values()) if prescription_doses else 1.0
     dose_final = normalize_dose(dose_hwd, max_prescription, cfg)
     target_tensor = dose_final[None, ...].astype(np.float32)
 
-    return input_tensor, target_tensor
+    masks_hwd = {name: m.astype(np.float32) for name, m in {**ptv_hwd, **oar_hwd}.items()}
+
+    return input_tensor, target_tensor, masks_hwd
 
 
 # --------------------------------------------------------------------------- #
