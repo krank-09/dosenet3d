@@ -18,6 +18,7 @@ import importlib.util
 import json
 import math
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -36,6 +37,15 @@ from model import DoseNet3D, fold_depth_into_batch, unfold_batch_to_depth, print
 def _load_module_from_path(module_name: str, file_path):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     module = importlib.util.module_from_spec(spec)
+    # Must register in sys.modules *before* exec_module: evaluate.py uses
+    # `from __future__ import annotations` + @dataclass, and Python's
+    # dataclass machinery resolves string type hints via
+    # sys.modules[cls.__module__] -- if the module isn't registered yet,
+    # that lookup returns None and dataclass() crashes with
+    # "'NoneType' object has no attribute '__dict__'" (hit for real
+    # 2026-09-13 once the Kaggle bundle finally had all its dependencies
+    # present and this loader got exercised for the first time end-to-end).
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -226,6 +236,11 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out_dir", default="./runs/dosenet3d_real")
     parser.add_argument("--resume", default=None, help="checkpoint path to resume from (e.g. after a dropped Colab session)")
+    parser.add_argument("--lr_schedule_total_epochs", type=int, default=None,
+                         help="total epoch count the cosine LR schedule should span across ALL resumed runs "
+                              "combined (defaults to --epochs). Set this to the true intended total (e.g. 90) "
+                              "when you know training will continue in a later --resume run, so the LR doesn't "
+                              "jump back up to its max value at the start of every resumed session.")
     parser.add_argument("--checkpoint_every_batches", type=int, default=20,
                          help="mid-epoch checkpoint frequency (batches); 0 disables")
     parser.add_argument("--deadline_epoch_seconds", type=float, default=None,
@@ -275,24 +290,60 @@ def main():
     model = DoseNet3D(in_channels=3).to(device)
     print_model_summary(model)
 
-    start_epoch = 1
-    if args.resume:
-        model.load_state_dict(torch.load(args.resume, map_location=device))
-        print(f"Resumed weights from {args.resume}")
-
     criterion = CompositeDoseLoss(lambda_gradient=args.lambda_gradient, lambda_organ=args.lambda_organ).to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
+    scheduler_t_max = args.lr_schedule_total_epochs or args.epochs
+    scheduler = CosineAnnealingLR(optimizer, T_max=max(scheduler_t_max, 1))
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
+
+    # Checkpoints are saved below as a dict {"model", "optimizer", "scheduler",
+    # "epoch", "val_loss"} rather than a bare model.state_dict(), so a
+    # --resume can restore optimizer momentum + the cosine schedule's
+    # position instead of restarting the LR at its max every session (that
+    # was a real bug: every resumed run previously reset the schedule to
+    # epoch 0, causing a visible val-loss regression right after resuming --
+    # e.g. 18.02 at the end of one run, 27.78 after just 1 epoch of the
+    # next). Old-format checkpoints (a bare state_dict, no "model" key) are
+    # still loaded fine -- model-only, optimizer/scheduler start fresh, exactly
+    # the previous behaviour -- so existing checkpoints from before this fix
+    # keep working.
+    start_epoch = 1
+    best_val_loss = math.inf
+    if args.resume:
+        ckpt = torch.load(args.resume, map_location=device)
+        if isinstance(ckpt, dict) and "model" in ckpt:
+            model.load_state_dict(ckpt["model"])
+            if "optimizer" in ckpt:
+                try:
+                    optimizer.load_state_dict(ckpt["optimizer"])
+                except Exception as e:
+                    print(f"[resume] could not restore optimizer state: {e}")
+            if "scheduler" in ckpt:
+                try:
+                    scheduler.load_state_dict(ckpt["scheduler"])
+                except Exception as e:
+                    print(f"[resume] could not restore scheduler state: {e}")
+            start_epoch = ckpt.get("epoch", 0) + 1
+            best_val_loss = ckpt.get("val_loss", math.inf)
+            print(f"Resumed full training state from {args.resume}: continuing at epoch "
+                  f"{start_epoch} (scheduler T_max={scheduler_t_max}, best_val_loss={best_val_loss})")
+        else:
+            model.load_state_dict(ckpt)
+            print(f"Resumed weights only (legacy checkpoint format, no optimizer/scheduler state) "
+                  f"from {args.resume} -- optimizer/schedule start fresh from epoch 1")
+
     oar_label_swap = build_oar_label_swap(GDP_HMM_OAR_LABEL_MAP)
     augment = AugConfig(oar_label_swap=oar_label_swap)
 
+    def make_ckpt(epoch_num, val_loss):
+        return {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(), "epoch": epoch_num, "val_loss": val_loss}
+
     def save_mid_epoch(n_batches_done):
-        torch.save(model.state_dict(), os.path.join(args.out_dir, "dosenet3d_mid_epoch.pt"))
+        torch.save(make_ckpt(epoch, best_val_loss), os.path.join(args.out_dir, "dosenet3d_mid_epoch.pt"))
         print(f"  [mid-epoch checkpoint @ batch {n_batches_done}]", flush=True)
 
     history = []
-    best_val_loss = math.inf
     stopped_for_deadline = False
     for epoch in range(start_epoch, args.epochs + 1):
         if args.deadline_epoch_seconds is not None and time.time() >= args.deadline_epoch_seconds:
@@ -321,16 +372,20 @@ def main():
         # full-resolution 3D run is avoidable, so always overwrite "last"
         # and additionally keep "best" by val loss.
         last_path = os.path.join(args.out_dir, "dosenet3d_last.pt")
-        torch.save(model.state_dict(), last_path)
+        torch.save(make_ckpt(epoch, val_stats["loss"]), last_path)
         if val_stats["loss"] < best_val_loss:
             best_val_loss = val_stats["loss"]
-            torch.save(model.state_dict(), os.path.join(args.out_dir, "dosenet3d_best.pt"))
+            torch.save(make_ckpt(epoch, best_val_loss), os.path.join(args.out_dir, "dosenet3d_best.pt"))
         with open(os.path.join(args.out_dir, "history.json"), "w") as f:
             json.dump(history, f, indent=2)
 
-    status = "stopped at deadline" if stopped_for_deadline else "completed all epochs"
-    print(f"\nTraining {status}. Last checkpoint: {os.path.join(args.out_dir, 'dosenet3d_last.pt')}, "
-          f"best (val_loss={best_val_loss:.4f}): {os.path.join(args.out_dir, 'dosenet3d_best.pt')}")
+    if not history:
+        status = "eval-only run (no epochs requested this session)"
+        print(f"\nTraining skipped -- {status}. Evaluating the --resume checkpoint as-is.")
+    else:
+        status = "stopped at deadline" if stopped_for_deadline else "completed all epochs"
+        print(f"\nTraining {status}. Last checkpoint: {os.path.join(args.out_dir, 'dosenet3d_last.pt')}, "
+              f"best (val_loss={best_val_loss:.4f}): {os.path.join(args.out_dir, 'dosenet3d_best.pt')}")
 
     # --- Loss curve (presentation artifact) ---
     try:
@@ -352,8 +407,11 @@ def main():
     # --- Final test-set eval using the BEST checkpoint (by val loss), not last ---
     best_path = os.path.join(args.out_dir, "dosenet3d_best.pt")
     if os.path.exists(best_path):
-        model.load_state_dict(torch.load(best_path, map_location=device))
+        best_ckpt = torch.load(best_path, map_location=device)
+        model.load_state_dict(best_ckpt["model"] if isinstance(best_ckpt, dict) and "model" in best_ckpt else best_ckpt)
         print(f"Loaded best checkpoint for final eval: {best_path}")
+    # else: no training happened this run (e.g. an eval-only --epochs 0
+    # rerun) -- `model` already holds whatever --resume loaded above.
     model.eval()
 
     test_paths = [chosen[pid] for pid in manifest["split"]["test"] if pid in chosen]
@@ -389,10 +447,13 @@ def main():
         }
         with open(os.path.join(args.out_dir, "final_eval.json"), "w") as f:
             json.dump(final_summary, f, indent=2)
+        epochs_line = (f"{len(history)} ({'stopped at deadline' if stopped_for_deadline else 'full run'})"
+                       if history else "0 (eval-only rerun of a --resume checkpoint, no training this session)")
         with open(os.path.join(args.out_dir, "final_eval.md"), "w") as f:
             f.write(f"# DoseNet3D final evaluation\n\n"
-                    f"- Epochs completed: {len(history)} ({'stopped at deadline' if stopped_for_deadline else 'full run'})\n"
-                    f"- Best val loss: {best_val_loss:.4f}\n"
+                    f"- Epochs completed this session: {epochs_line}\n"
+                    f"- Best val loss (this session, or resumed checkpoint's if none): "
+                    f"{'n/a (legacy checkpoint had no stored val loss)' if best_val_loss == math.inf else f'{best_val_loss:.4f}'}\n"
                     f"- Test patients evaluated: {len(per_patient)}/{len(test_paths)}\n"
                     f"- Voxel MAE (Gy): {final_summary['voxel_mae_gy_mean']:.3f} ± {final_summary['voxel_mae_gy_std']:.3f}\n")
         print(f"Final eval written: {os.path.join(args.out_dir, 'final_eval.json')}")
