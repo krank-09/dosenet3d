@@ -5,6 +5,8 @@
 
 An asymmetric 3-D U-Net that predicts the **full dose distribution**, in Gy at every voxel, for a head-and-neck radiotherapy patient from their CT scan and contours, before any treatment plan has been made. It was trained on the GDP-HMM dataset (AAPM 2025 Grand Challenge). This is the volumetric companion to [dvhnet](https://github.com/krank-09/dvhnet), which predicts per-organ DVH curves instead.
 
+**Based on** the hybrid 2D/3D deformable dose-prediction network of Liu et al. (Medical & Biological Engineering & Computing, 2025; full citation in Credits). The architecture follows the paper: a 3-D convolutional encoder, a 2-D deformable decoder for the anisotropic slice spacing, and residual squeeze-and-excitation blocks with deformable convolutions (RDSEM). It's written from scratch in PyTorch here, and trained and evaluated on the public GDP-HMM head-and-neck data rather than the paper's nasopharyngeal cohort.
+
 > Research code for learning purposes. **Not for clinical use.**
 
 ## Architecture
@@ -101,12 +103,36 @@ python train.py --data_root /path/to/GDP-HMM --resume runs/dosenet3d/dosenet3d_b
 
 - **Data:** GDP-HMM Challenge, AAPM 2025, licensed CC BY-NC-SA 4.0. R. Gao, M. Diallo, H. Liu, A. Magliari, W. Verbakel, S. Meyers, M. Zarepisheh, R. Mcbeth, S. Arberet, M. Kraus, F. Ghesu, A. Kamen. *Automating RT Planning at Scale: High Quality Data For AI Training.* arXiv:2501.11803, 2025.
 - **Data conventions** (`PTV_DICT.json`, dose scaling) follow the challenge repository by Riqiang Gao et al. (MIT): https://github.com/RiqiangGao/GDP-HMM_AAPMChallenge
-- **Architecture building blocks:**
+- **Architecture:** Y. Liu, W. Luo, X. Li, M. Liu. *Deformable dose prediction network based on hybrid 2D and 3D convolution for nasopharyngeal carcinoma radiotherapy.* Medical & Biological Engineering & Computing 63(3):733–747, 2025. doi:[10.1007/s11517-024-03231-8](https://doi.org/10.1007/s11517-024-03231-8)
+- **Building blocks it uses:**
   - U-Net (Ronneberger et al., MICCAI 2015) and 3-D U-Net (Çiçek et al., MICCAI 2016)
   - Squeeze-and-Excitation Networks (Hu et al., CVPR 2018)
   - Deformable ConvNets v2 (Zhu et al., CVPR 2019), via `torchvision.ops.DeformConv2d`
   - Instance Normalization (Ulyanov et al., 2016)
   - AdamW (Loshchilov & Hutter, ICLR 2019)
+
+<details>
+<summary>BibTeX</summary>
+
+```bibtex
+@article{liu2025deformable,
+  title   = {Deformable dose prediction network based on hybrid 2D and 3D convolution for nasopharyngeal carcinoma radiotherapy},
+  author  = {Liu, Yanhua and Luo, Wang and Li, Xiangchen and Liu, Min},
+  journal = {Medical \& Biological Engineering \& Computing},
+  volume  = {63},
+  number  = {3},
+  pages   = {733--747},
+  year    = {2025},
+  doi     = {10.1007/s11517-024-03231-8}
+}
+@article{gao2025gdphmm,
+  title   = {Automating RT Planning at Scale: High Quality Data For AI Training},
+  author  = {Gao, Riqiang and Diallo, Mamadou and Liu, Han and Magliari, Anthony and Verbakel, Wilko and Meyers, Sandra and Zarepisheh, Masoud and Mcbeth, Rafe and Arberet, Simon and Kraus, Martin and Ghesu, Florin and Kamen, Ali},
+  journal = {arXiv preprint arXiv:2501.11803},
+  year    = {2025}
+}
+```
+</details>
 
 ## License
 

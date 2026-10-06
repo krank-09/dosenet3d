@@ -1,7 +1,9 @@
 """
 model.py
 ========
-DoseNet3D: an asymmetric U-Net for 3D dose prediction.
+DoseNet3D: an asymmetric U-Net for 3D dose prediction, following the hybrid
+2D/3D deformable network of Liu et al., Med Biol Eng Comput 63:733-747 (2025),
+doi:10.1007/s11517-024-03231-8.
 
     Encoder: 3D convolutions (true 3D context) with residual
              squeeze-and-excitation blocks (RSEM), downsampling on all
