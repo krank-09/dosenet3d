@@ -2,13 +2,13 @@
 train.py
 ========
 DoseNet3D training script. Trains on real GDP-HMM data via
-gdp_hmm_adapter.GDPHMMDoseDataset (synthetic_data.py's fabricated cohort was
+pipeline_adapter.GDPHMMDoseDataset (synthetic_data.py's fabricated cohort was
 smoke-test-only scaffolding, no longer used here now that real data is
 available).
 
 Usage:
     python train.py --epochs 50 --batch_size 1 \
-        --data_splits_json ../data_splits.json --out_dir runs/dosenet3d_real
+        --data_root /path/to/GDP-HMM --out_dir runs/dosenet3d_real
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def _apply_inplane_affine_5d(x: torch.Tensor, theta: torch.Tensor, mode: str) ->
     """Apply the SAME (per-patient) in-plane affine to every D slice of a
     [B, C, H, W, D] tensor -- i.e. a single rigid in-plane transform per
     volume, never a different one per slice (that would be an elastic-like
-    warp along z, which the spec explicitly excludes) and never anything
+    warp along z, which would distort anatomy between slices) and never anything
     touching the D axis itself. Reuses model.py's batch<->depth fold so the
     slice ordering exactly matches the convention RDSEM relies on."""
     x2d, b, d = fold_depth_into_batch(x)
@@ -229,8 +229,10 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--lambda_gradient", type=float, default=0.5)
     parser.add_argument("--lambda_organ", type=float, default=0.3)
-    parser.add_argument("--data_splits_json", default="../../data/data_splits.json",
-                         help="shared patient-level train/val/test manifest (see data_splits.json at repo root)")
+    parser.add_argument("--data_splits_json", default="splits/data_splits_reduced180.json",
+                         help="patient-level train/val/test manifest (see splits/)")
+    parser.add_argument("--data_root", default=".",
+                         help="folder that relative paths in the manifest are resolved against")
     parser.add_argument("--meta_dir", default=str(DEFAULT_META_DIR))
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
@@ -270,7 +272,8 @@ def main():
 
     with open(args.data_splits_json) as f:
         manifest = json.load(f)
-    chosen = manifest["chosen_file_per_patient"]
+    chosen = {pid: str(Path(args.data_root) / p)  # absolute paths pass through unchanged
+              for pid, p in manifest["chosen_file_per_patient"].items()}
     train_paths = [chosen[pid] for pid in manifest["split"]["train"] if pid in chosen]
     val_paths = [chosen[pid] for pid in manifest["split"]["val"] if pid in chosen]
 

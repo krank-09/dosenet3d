@@ -1,66 +1,27 @@
 """
 data_pipeline.py
 =================
-Real-data preprocessing logic for dosenet3d, structured so it can already be
-exercised on synthetic data (see synthetic_data.py) with zero code changes
-once real GDP-HMM data is available -- only `load_and_preprocess_patient`'s
-DICOM-reading calls (currently stubbed) need to be wired up, or replaced by
-a GDP-HMM-specific adapter that calls `preprocess_arrays` directly.
+Pure-numpy preprocessing that turns already-loaded [Z, H, W] arrays (CT,
+PTV/OAR masks, dose) into dosenet3d's model tensors:
 
-Tensor layout (see module docstring in synthetic_data.py for the full spec):
     input:  [C, H, W, D]  (C=3 by default: CT, PTV, OAR)
     target: [1, H, W, D]  dose in Gy (or normalized by prescription dose)
 
-Two layers:
-  - `preprocess_arrays` and its helpers (window_and_normalize_ct,
-    build_ptv_channel, build_oar_channel, resample_inplane_only,
-    crop_or_pad_depth, ...): pure numpy, fully implemented, real-data-ready.
-    These operate on already-loaded [Z, H, W] arrays regardless of how they
-    were loaded, so they're directly testable without any DICOM/GDP-HMM
-    access -- synthetic_data.py exercises the channel-construction pieces
-    directly.
-  - `load_and_preprocess_patient`: the real-data entry point. Raises
-    NotImplementedError -- GDP-HMM Hugging Face access is still pending.
-    When wiring it up, reuse dvhnet/preprocessing.py's DICOM/RTDOSE/RTSTRUCT
-    loaders (do not reimplement them); see its docstring below for exactly
-    which functions to call.
+`preprocess_arrays` and its helpers (window_and_normalize_ct,
+build_ptv_channel, build_oar_channel, resample_inplane_only,
+crop_or_pad_depth, ...) don't care how the arrays were loaded:
+pipeline_adapter.py feeds them real GDP-HMM .npz patients, and
+synthetic_data.py feeds them fabricated volumes for smoke tests.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-# --------------------------------------------------------------------------- #
-# Reuse dvhnet's DICOM/resampling helpers rather than reimplementing them.
-#
-# Loaded via importlib under a private module name (NOT sys.path.insert +
-# plain `import`) because dvhnet/ has its own model.py, losses.py, dataset.py
-# and train.py -- putting dvhnet/ on sys.path would silently shadow
-# dosenet3d's same-named modules (hit exactly this bug the first time this
-# was written as a plain sys.path insert: `from losses import
-# CompositeDoseLoss` in this package's train.py resolved to dvhnet/losses.py
-# instead). This way there's no shared namespace at all.
-# --------------------------------------------------------------------------- #
-
-def _load_module_from_path(module_name: str, file_path: Path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    # dataclasses' internal type resolution looks the module up via
-    # sys.modules[cls.__module__] -- must register before exec_module.
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_DVHNET_DIR = Path(__file__).resolve().parent.parent / "dvhnet"
-_dvhnet_preprocessing = _load_module_from_path("_dvhnet_preprocessing", _DVHNET_DIR / "preprocessing.py")
-_dvhnet_resample_volume = _dvhnet_preprocessing.resample_volume
+from dvh_utils import resample_volume as _resample_volume  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -225,7 +186,7 @@ def resample_inplane_only(volume_zhw: np.ndarray, spacing: Tuple[float, float, f
     z, h, w = volume_zhw.shape
     dst_spacing = (dz, dy * h / target_hw[0], dx * w / target_hw[1])
     dst_shape = (z, target_hw[0], target_hw[1])
-    resampled = _dvhnet_resample_volume(volume_zhw, spacing, dst_spacing, dst_shape=dst_shape, order=order)
+    resampled = _resample_volume(volume_zhw, spacing, dst_spacing, dst_shape=dst_shape, order=order)
     return resampled, dst_spacing
 
 
@@ -272,7 +233,7 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
     The single place the windowing / channel-construction / in-plane
     resample / depth-crop logic lives. Takes already-loaded [Z, H, W]
     CT/dose/mask arrays -- however they were loaded (DICOM via
-    dvhnet.preprocessing today, or gdp_hmm_adapter.py) -- and returns the
+    pipeline_adapter.py) -- and returns the
     final [C, H, W, D] input tensor, [1, H, W, D] target tensor, and a
     {structure_name: [H, W, D] binary} dict of every PTV/OAR mask at the
     SAME post-resample/post-crop grid as the input/target -- callers (the
@@ -345,44 +306,3 @@ def preprocess_arrays(ct_hu_zhw: np.ndarray,
     masks_hwd = {name: m.astype(np.float32) for name, m in {**ptv_hwd, **oar_hwd}.items()}
 
     return input_tensor, target_tensor, masks_hwd
-
-
-# --------------------------------------------------------------------------- #
-# Real-data entry point -- NOT YET IMPLEMENTED
-# --------------------------------------------------------------------------- #
-
-def load_and_preprocess_patient(ct_dir: str, rtstruct_path: str, rtdose_path: str,
-                                 cfg: PreprocessConfig,
-                                 prescription_doses: Dict[str, float],
-                                 oar_label_map: Dict[str, int] = None,
-                                 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Real-data entry point: DICOM -> [C, H, W, D] input tensor + [1, H, W, D]
-    dose target.
-
-    NOT YET IMPLEMENTED -- GDP-HMM Hugging Face dataset access is still
-    pending approval. When it lands, do NOT reimplement DICOM/RTSTRUCT/
-    RTDOSE loading here -- reuse dvhnet/preprocessing.py's existing helpers:
-        - dvhnet.preprocessing.load_ct_series       CT dir -> ([Z,H,W] HU, spacing, origin, slices)
-        - dvhnet.preprocessing.load_rtdose          RTDOSE -> ([Z,H,W] Gy*, spacing, origin)  (*raw grid; multiply by DoseGridScaling if loading GDP-HMM's own npz format instead, see note below)
-        - dvhnet.preprocessing.load_rtstruct_masks  RTSTRUCT -> {name: [Z,H,W] binary}
-        - dvhnet.preprocessing.align_dose_to_ct     origin-aware dose->CT alignment (fixed bug: see dvhnet/README.md)
-    then feed the results into `preprocess_arrays` above (which is already
-    fully implemented and real-data-ready) rather than duplicating any of
-    its windowing/channel/resample/crop logic.
-
-    Note: GDP-HMM's actual distribution format is a pre-packaged per-patient
-    .npz dict (documented in GDP-HMM_AAPMChallenge/data_visual_understand.ipynb),
-    not raw DICOM -- the GDP-HMM-specific adapter (built once HF access is
-    approved) will most likely skip this DICOM path entirely and call
-    `preprocess_arrays` directly with arrays read straight out of that npz.
-    This function stays as the generic DICOM fallback for the case where you
-    have your own DICOM data instead of/in addition to GDP-HMM's npz files.
-    """
-    raise NotImplementedError(
-        "DICOM loading not wired up yet -- GDP-HMM Hugging Face access is "
-        "still pending. See this function's docstring for the "
-        "dvhnet.preprocessing helpers to call once real data is available; "
-        "preprocess_arrays() in this module is already implemented and "
-        "ready to receive whatever arrays that loading step produces."
-    )

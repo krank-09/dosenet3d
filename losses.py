@@ -38,7 +38,7 @@ import torch.nn.functional as F
 #
 # Includes both "Brainstem" (data_pipeline.DEFAULT_OAR_LABEL_MAP /
 # synthetic_data.py's naming, following dvhnet's original convention) and
-# "BrainStem" (the real GDP-HMM naming found in dvhnet/gdp_hmm_adapter.py,
+# "BrainStem" (the real GDP-HMM naming found in the GDP-HMM .npz files,
 # e.g. "BrainStem_03") -- these two tracks use different casing for the same
 # structure and this set has to match both, or synthetic data silently gets
 # the wrong (parallel) weight, which is exactly what happened here before

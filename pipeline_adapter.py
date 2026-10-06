@@ -1,9 +1,9 @@
 """
-gdp_hmm_adapter.py
+pipeline_adapter.py
 ===================
 Real-data GDP-HMM npz -> dosenet3d's [C,H,W,D] input / [1,H,W,D] target
 tensors, replacing synthetic_data.py as the training data source. Mirrors
-dvhnet/gdp_hmm_adapter.py's npz-reading conventions (same raw arr_0-pickle
+dvhnet's pipeline_adapter.py npz-reading conventions (same raw arr_0-pickle
 format, same PTV_DICT.json/Pat_Obj_DICT.json metadata resolution) but feeds
 data_pipeline.preprocess_arrays instead of deriving DVH curves.
 
@@ -11,7 +11,7 @@ Key departure from data_pipeline.py's DEFAULT_OAR_LABEL_MAP: that map was
 written for the synthetic smoke test and assumes separate Parotid_L/
 Parotid_R structures. Real GDP-HMM head-and-neck patients only ship a single
 combined "Parotids" mask (confirmed against real files -- see
-dvhnet/gdp_hmm_adapter.py's docstring and TODO.md), so this adapter uses its
+dvhnet's pipeline_adapter.py), so this adapter uses its
 own GDP_HMM_OAR_LABEL_MAP = {"BrainStem": 1, "SpinalCord": 2, "Parotids": 3}.
 
 PTV masks/doses are resolved for every available level (PTV_High/Mid/Low)
@@ -53,7 +53,8 @@ CANONICAL_MASK_KEYS = list(PTV_LEVELS) + list(GDP_HMM_OAR_LABEL_MAP.keys())
 PTV_KEY_CANDIDATES = ["PTV_Total", "PTV70", "PTVHighOPT", "PTV", "CTV"]
 FALLBACK_PRESCRIPTION_GY = 70.0  # only used when metadata doesn't have this patient
 
-DEFAULT_META_DIR = Path(__file__).resolve().parent.parent.parent / "pipeline" / "meta_files"
+# copy meta_files/ (PTV_DICT.json etc.) from the GDP-HMM challenge repo; see README
+DEFAULT_META_DIR = Path(__file__).resolve().parent / "meta_files"
 
 
 def load_gdp_hmm_npz(path: str) -> Dict:

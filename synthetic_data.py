@@ -6,8 +6,7 @@ DICOM/GDP-HMM data -- it fabricates shape-correct volumes with plausible
 anatomical *structure* (a blob-shaped PTV, a few nearby OAR blobs, a dose
 field that falls off with distance from the PTV and dips inside the OARs)
 purely so dosenet3d's model/loss/training code can be exercised end-to-end
-before real GDP-HMM data is available (Hugging Face access is still
-pending). Do not draw any conclusions about model *quality* from results on
+without the (gated) GDP-HMM data, e.g. in tests and CI. Do not draw any conclusions about model *quality* from results on
 this data -- it exists to catch shape and wiring bugs, not to validate
 dose-prediction accuracy.
 
@@ -23,8 +22,8 @@ Tensor layout matches data_pipeline.py's real-data spec exactly:
 
 Channel construction is delegated to data_pipeline.py's
 window_and_normalize_ct / build_ptv_channel / build_oar_channel /
-normalize_dose -- the exact same functions the real GDP-HMM adapter will
-call -- so this smoke test exercises real preprocessing code, not a
+normalize_dose -- the exact same functions the real GDP-HMM adapter
+(pipeline_adapter.py) calls -- so this smoke test exercises real preprocessing code, not a
 parallel reimplementation of it. Only the blob/dose fabrication below is
 synthetic-only.
 """

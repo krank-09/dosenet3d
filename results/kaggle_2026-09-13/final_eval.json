@@ -1,0 +1,212 @@
+{
+  "model": "dosenet3d",
+  "n_test_patients_evaluated": 50,
+  "n_test_patients_total": 50,
+  "voxel_mae_gy_mean": 1.4211431121826172,
+  "voxel_mae_gy_std": 0.8225334476856836,
+  "best_val_loss": 17.230913715362547,
+  "epochs_completed": 32,
+  "stopped_for_deadline": true,
+  "per_patient": [
+    {
+      "patient": "0522c0012",
+      "voxel_mae_gy": 1.950160264968872
+    },
+    {
+      "patient": "0522c0079",
+      "voxel_mae_gy": 1.030341625213623
+    },
+    {
+      "patient": "0522c0117",
+      "voxel_mae_gy": 1.027929663658142
+    },
+    {
+      "patient": "0522c0132",
+      "voxel_mae_gy": 1.1783502101898193
+    },
+    {
+      "patient": "0522c0142",
+      "voxel_mae_gy": 0.9495317339897156
+    },
+    {
+      "patient": "0522c0607",
+      "voxel_mae_gy": 0.846886932849884
+    },
+    {
+      "patient": "0522c0659",
+      "voxel_mae_gy": 0.8619688749313354
+    },
+    {
+      "patient": "0522c0708",
+      "voxel_mae_gy": 1.3078584671020508
+    },
+    {
+      "patient": "0522c0771",
+      "voxel_mae_gy": 1.0857704877853394
+    },
+    {
+      "patient": "HN-CHUM-010",
+      "voxel_mae_gy": 0.9686121940612793
+    },
+    {
+      "patient": "HN-CHUM-020",
+      "voxel_mae_gy": 2.4009828567504883
+    },
+    {
+      "patient": "HN-CHUM-023",
+      "voxel_mae_gy": 2.149369239807129
+    },
+    {
+      "patient": "HN-CHUM-053",
+      "voxel_mae_gy": 0.9727157354354858
+    },
+    {
+      "patient": "HN-CHUS-096",
+      "voxel_mae_gy": 1.5598595142364502
+    },
+    {
+      "patient": "HN-CHUS-099",
+      "voxel_mae_gy": 2.014899969100952
+    },
+    {
+      "patient": "HN-CHUS-100",
+      "voxel_mae_gy": 3.8373310565948486
+    },
+    {
+      "patient": "HN-CHUS-102",
+      "voxel_mae_gy": 1.5192372798919678
+    },
+    {
+      "patient": "HN-HGJ-012",
+      "voxel_mae_gy": 1.0016252994537354
+    },
+    {
+      "patient": "HN-HGJ-029",
+      "voxel_mae_gy": 1.062731146812439
+    },
+    {
+      "patient": "HN-HGJ-067",
+      "voxel_mae_gy": 1.478101372718811
+    },
+    {
+      "patient": "HN-HGJ-070",
+      "voxel_mae_gy": 0.988268256187439
+    },
+    {
+      "patient": "HN-HMR-027",
+      "voxel_mae_gy": 0.9902235865592957
+    },
+    {
+      "patient": "HN-HMR-029",
+      "voxel_mae_gy": 0.9850013852119446
+    },
+    {
+      "patient": "HNC_039",
+      "voxel_mae_gy": 1.0217235088348389
+    },
+    {
+      "patient": "HNC_041",
+      "voxel_mae_gy": 1.7317969799041748
+    },
+    {
+      "patient": "HNC_060",
+      "voxel_mae_gy": 5.732202529907227
+    },
+    {
+      "patient": "HNC_099",
+      "voxel_mae_gy": 0.941175639629364
+    },
+    {
+      "patient": "HNC_126",
+      "voxel_mae_gy": 0.8693779110908508
+    },
+    {
+      "patient": "HNC_138",
+      "voxel_mae_gy": 0.9861418008804321
+    },
+    {
+      "patient": "HNC_157",
+      "voxel_mae_gy": 1.075260877609253
+    },
+    {
+      "patient": "HNC_159",
+      "voxel_mae_gy": 1.2142363786697388
+    },
+    {
+      "patient": "HNC_166",
+      "voxel_mae_gy": 1.306088924407959
+    },
+    {
+      "patient": "HNC_190",
+      "voxel_mae_gy": 0.9869509935379028
+    },
+    {
+      "patient": "HNC_196",
+      "voxel_mae_gy": 0.7985898852348328
+    },
+    {
+      "patient": "HNSCC-01-0001",
+      "voxel_mae_gy": 1.8700259923934937
+    },
+    {
+      "patient": "HNSCC-01-0017",
+      "voxel_mae_gy": 1.1353214979171753
+    },
+    {
+      "patient": "HNSCC-01-0019",
+      "voxel_mae_gy": 1.4999886751174927
+    },
+    {
+      "patient": "HNSCC-01-0031",
+      "voxel_mae_gy": 1.1985087394714355
+    },
+    {
+      "patient": "HNSCC-01-0048",
+      "voxel_mae_gy": 1.2346327304840088
+    },
+    {
+      "patient": "HNSCC-01-0053",
+      "voxel_mae_gy": 1.276828646659851
+    },
+    {
+      "patient": "HNSCC-01-0065",
+      "voxel_mae_gy": 1.730759620666504
+    },
+    {
+      "patient": "HNSCC-01-0068",
+      "voxel_mae_gy": 1.1414450407028198
+    },
+    {
+      "patient": "HNSCC-01-0100",
+      "voxel_mae_gy": 1.273148536682129
+    },
+    {
+      "patient": "HNSCC-01-0104",
+      "voxel_mae_gy": 0.952853798866272
+    },
+    {
+      "patient": "HNSCC-01-0150",
+      "voxel_mae_gy": 1.3435711860656738
+    },
+    {
+      "patient": "HNSCC-01-0165",
+      "voxel_mae_gy": 2.716064691543579
+    },
+    {
+      "patient": "HNSCC-01-0174",
+      "voxel_mae_gy": 1.5519607067108154
+    },
+    {
+      "patient": "HNSCC-01-0197",
+      "voxel_mae_gy": 1.2834945917129517
+    },
+    {
+      "patient": "HNSCC-01-0200",
+      "voxel_mae_gy": 1.1058175563812256
+    },
+    {
+      "patient": "HNSCC-01-0211",
+      "voxel_mae_gy": 0.9114310145378113
+    }
+  ]
+}

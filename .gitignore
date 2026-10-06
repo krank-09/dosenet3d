@@ -1,6 +1,15 @@
 __pycache__/
 *.pyc
 .DS_Store
+.venv/
+.pytest_cache/
+.claude/
+
+# data, derived data and weights (GDP-HMM is CC BY-NC-SA 4.0 + gated: never commit it)
+*.npz
+shards/
+shards_*/
+meta_files/
 runs/
 *.pt
 *.pth
